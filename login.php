@@ -17,16 +17,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows == 1) {
             $user = $result->fetch_assoc();
             
-            
+            // পাসওয়ার্ড ভ্যালিডেশন (Plain or Hashed)
             if (password_verify($password, $user['password']) || $password === $user['password']) {
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['username'] = $user['username'];
                 $_SESSION['role'] = $user['role'];
 
-                
-                if ($user['role'] === 'admin') {
+                // রোল অনুযায়ী সঠিক ড্যাশবোর্ডে রিডাইরেক্ট (Case-Insensitive Check)
+                $role = strtolower(trim($user['role']));
+
+                if ($role === 'admin') {
                     header("Location: dashboard.php");
-                } elseif ($user['role'] === 'teacher') {
+                } elseif ($role === 'teacher') {
                     header("Location: teacher_dashboard.php");
                 } else {
                     header("Location: student_dashboard.php");
