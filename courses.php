@@ -16,6 +16,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_course'])) {
     $course_name = trim($_POST['course_name']);
     $credits     = trim($_POST['credits']);
     $dept_input  = trim($_POST['department']);
+    $batch       = trim($_POST['batch']); // Batch field
     $teacher     = trim($_POST['teacher']); // Selected teacher username
 
     // ডিপার্টমেন্ট আইডি খোঁজা
@@ -41,11 +42,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_course'])) {
         if ($res->num_rows > 0) {
             $error = "❌ Course Code already exists!";
         } else {
-            // INSERT Query (assigned_teacher সহ)
-            $stmt = $conn->prepare("INSERT INTO courses (course_code, course_name, credits, department_id, assigned_teacher) VALUES (?, ?, ?, ?, ?)");
+            // INSERT Query (assigned_teacher ও batch সহ)
+            $stmt = $conn->prepare("INSERT INTO courses (course_code, course_name, credits, department_id, assigned_teacher, batch) VALUES (?, ?, ?, ?, ?, ?)");
             
             if ($stmt) {
-                $stmt->bind_param("ssdis", $course_code, $course_name, $credits, $dept_id, $teacher);
+                $stmt->bind_param("ssdiss", $course_code, $course_name, $credits, $dept_id, $teacher, $batch);
                 if ($stmt->execute()) {
                     $message = "✅ Course added successfully with teacher assignment!";
                 } else {
@@ -154,6 +155,11 @@ $courses_list = $conn->query("SELECT * FROM courses ORDER BY id DESC");
                 </div>
 
                 <div class="form-group">
+                    <label>Batch / Semester:</label>
+                    <input type="text" name="batch" placeholder="e.g. 61" required>
+                </div>
+
+                <div class="form-group">
                     <label>Assign Teacher (Optional):</label>
                     <select name="teacher">
                         <option value="">-- Select Teacher --</option>
@@ -180,6 +186,7 @@ $courses_list = $conn->query("SELECT * FROM courses ORDER BY id DESC");
                         <th>Code</th>
                         <th>Course Title</th>
                         <th>Credit</th>
+                        <th>Batch</th>
                         <th>Assigned Teacher</th>
                         <th>Action</th>
                     </tr>
@@ -191,6 +198,7 @@ $courses_list = $conn->query("SELECT * FROM courses ORDER BY id DESC");
                                 <td><b><?php echo htmlspecialchars($course['course_code']); ?></b></td>
                                 <td><?php echo htmlspecialchars($course['course_name']); ?></td>
                                 <td><?php echo htmlspecialchars($course['credits']); ?></td>
+                                <td><?php echo !empty($course['batch']) ? htmlspecialchars($course['batch']) : 'N/A'; ?></td>
                                 <td>
                                     <?php 
                                         echo !empty($course['assigned_teacher']) 
@@ -204,7 +212,7 @@ $courses_list = $conn->query("SELECT * FROM courses ORDER BY id DESC");
                             </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
-                        <tr><td colspan="5" style="text-align:center; color:#777;">No courses added yet.</td></tr>
+                        <tr><td colspan="6" style="text-align:center; color:#777;">No courses added yet.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

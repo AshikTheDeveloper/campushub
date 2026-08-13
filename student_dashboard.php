@@ -22,37 +22,104 @@ if ($stmt) {
     $stmt->close();
 }
 
+$student_id = $student_info['student_id'] ?? $username;
+$dept = $student_info['department'] ?? 'CSE';
+$batch = $student_info['batch'] ?? '';
+
+// ১.১. এনরোল্ড কোর্সের সংখ্যা ডাইনামিকালি বের করা (Multi-fallback Query)
+$enrolled_courses_count = 0;
+
+// প্রথম চেষ্টা: ব্যাচ অনুযায়ী কোর্স গণনা করা (courses টেবিলে batch কলাম রয়েছে)
+if (!empty($batch)) {
+    $e_stmt = $conn->prepare("SELECT COUNT(*) as total FROM courses WHERE batch = ?");
+    if ($e_stmt) {
+        $e_stmt->bind_param("s", $batch);
+        $e_stmt->execute();
+        $e_res = $e_stmt->get_result();
+        if ($e_res && $e_row = $e_res->fetch_assoc()) {
+            $enrolled_courses_count = $e_row['total'];
+        }
+        $e_stmt->close();
+    }
+}
+
+// দ্বিতীয় চেষ্টা: যদি ব্যাচ খালি বা না মিলে তবে course_enrollments টেবিল চেক করবে
+if ($enrolled_courses_count == 0) {
+    $e_stmt2 = $conn->prepare("SELECT COUNT(*) as total FROM course_enrollments WHERE student_id = ? OR student_id = ?");
+    if ($e_stmt2) {
+        $e_stmt2->bind_param("ss", $username, $student_id);
+        $e_stmt2->execute();
+        $e_res2 = $e_stmt2->get_result();
+        if ($e_res2 && $e_row2 = $e_res2->fetch_assoc()) {
+            $enrolled_courses_count = $e_row2['total'];
+        }
+        $e_stmt2->close();
+    }
+}
+
+// তৃতীয় চেষ্টা (Fallback): নির্দিষ্ট ফিল্টার কাজ না করলে সব কোর্স গণনা করা
+if ($enrolled_courses_count == 0) {
+    $all_c = $conn->query("SELECT COUNT(*) as total FROM courses");
+    if ($all_c && $all_row = $all_c->fetch_assoc()) {
+        $enrolled_courses_count = $all_row['total'];
+    }
+}
+
 // ২. অফিসিয়াল নোটিশ বোর্ড
 $notices_res = $conn->query("SELECT * FROM notices ORDER BY created_at DESC");
 
 // ৩. একাডেমিক মার্কস (Error Safe)
 $marks_res = false;
-$marks_stmt = $conn->prepare("SELECT * FROM marks WHERE student_id = ? ORDER BY id DESC");
+$marks_stmt = $conn->prepare("SELECT * FROM marks WHERE student_id = ? OR student_id = ? ORDER BY id DESC");
 if ($marks_stmt) {
-    $marks_stmt->bind_param("s", $username);
+    $marks_stmt->bind_param("ss", $username, $student_id);
     $marks_stmt->execute();
     $marks_res = $marks_stmt->get_result();
 }
 
-// ৩.১. এনরোল্ড কোর্স ও স্টাডি মেটেরিয়ালস (My Enrolled Courses & Study Materials)
-$materials_res = $conn->query("SELECT * FROM course_materials ORDER BY id DESC");
+// ৩.১. স্টাডি মেটেরিয়ালস (Error Safe Fetch)
+$materials_res = false;
+if (!empty($dept) && !empty($batch)) {
+    $mat_stmt = $conn->prepare("SELECT * FROM course_materials WHERE (department = ? AND batch = ?) OR batch = ? ORDER BY id DESC");
+    if ($mat_stmt) {
+        $mat_stmt->bind_param("sss", $dept, $batch, $batch);
+        $mat_stmt->execute();
+        $materials_res = $mat_stmt->get_result();
+    }
+} else {
+    $materials_res = $conn->query("SELECT * FROM course_materials ORDER BY id DESC");
+}
 
 // ৪. কোর্সভিত্তিক অ্যাটেনডেন্স ক্যালকুলেশন
 $att_summary = [];
 $total_classes_all = 0;
 $total_present_all = 0;
 
-$courses_res = $conn->query("SELECT * FROM courses ORDER BY course_code ASC");
+// স্টুডেন্টের ব্যাচ অনুযায়ী কোর্স ফেচ করা
+$courses_res = false;
+if (!empty($batch)) {
+    $courses_stmt = $conn->prepare("SELECT * FROM courses WHERE batch = ? ORDER BY course_code ASC");
+    if ($courses_stmt) {
+        $courses_stmt->bind_param("s", $batch);
+        $courses_stmt->execute();
+        $courses_res = $courses_stmt->get_result();
+    }
+}
+
+// যদি ব্যাচ অনুযায়ী না পাওয়া যায়, সব কোর্স লোড করবে
+if (!$courses_res || $courses_res->num_rows == 0) {
+    $courses_res = $conn->query("SELECT * FROM courses ORDER BY course_code ASC");
+}
 
 if ($courses_res && $courses_res->num_rows > 0) {
     while ($course = $courses_res->fetch_assoc()) {
         $c_id = $course['id'];
         
-        // নির্দিষ্ট কোর্সের মোট ক্লাস সংখ্যা (Error Safe)
+        // ১. ওই কোর্সে টিচার মোট কতটি ক্লাস (ইউনিক ডেট) নিয়েছেন
         $total_classes = 0;
-        $c_total_stmt = $conn->prepare("SELECT COUNT(*) as cnt FROM attendance WHERE course_id = ? AND student_id = ?");
+        $c_total_stmt = $conn->prepare("SELECT COUNT(DISTINCT attendance_date) as cnt FROM attendance WHERE course_id = ?");
         if ($c_total_stmt) {
-            $c_total_stmt->bind_param("is", $c_id, $username);
+            $c_total_stmt->bind_param("i", $c_id);
             $c_total_stmt->execute();
             $res_tot = $c_total_stmt->get_result();
             if ($res_tot) {
@@ -61,11 +128,11 @@ if ($courses_res && $courses_res->num_rows > 0) {
             $c_total_stmt->close();
         }
 
-        // নির্দিষ্ট কোর্সে প্রেজেন্ট বা লেট সংখ্যা (Error Safe)
+        // ২. এই স্টুডেন্ট ওই কোর্সে কয়টিতে Present/Late ছিল
         $present_classes = 0;
-        $c_pres_stmt = $conn->prepare("SELECT COUNT(*) as cnt FROM attendance WHERE course_id = ? AND student_id = ? AND (status = 'Present' OR status = 'Late')");
+        $c_pres_stmt = $conn->prepare("SELECT COUNT(*) as cnt FROM attendance WHERE course_id = ? AND (student_id = ? OR student_id = ?) AND (status = 'Present' OR status = 'Late')");
         if ($c_pres_stmt) {
-            $c_pres_stmt->bind_param("is", $c_id, $username);
+            $c_pres_stmt->bind_param("iss", $c_id, $username, $student_id);
             $c_pres_stmt->execute();
             $res_pres = $c_pres_stmt->get_result();
             if ($res_pres) {
@@ -74,20 +141,20 @@ if ($courses_res && $courses_res->num_rows > 0) {
             $c_pres_stmt->close();
         }
 
-        if ($total_classes > 0) {
-            $percentage = round(($present_classes / $total_classes) * 100);
-            $att_summary[] = [
-                'course_code' => $course['course_code'],
-                'course_name' => $course['course_name'],
-                'credit' => $course['credit'],
-                'total' => $total_classes,
-                'present' => $present_classes,
-                'percentage' => $percentage
-            ];
+        // ৩. পার্সেন্টেজ হিসাব
+        $percentage = ($total_classes > 0) ? round(($present_classes / $total_classes) * 100) : 0;
+        
+        $att_summary[] = [
+            'course_code' => $course['course_code'],
+            'course_name' => $course['course_name'],
+            'credit'      => $course['credits'] ?? $course['credit'] ?? 0,
+            'total'       => $total_classes,
+            'present'     => $present_classes,
+            'percentage'  => $percentage
+        ];
 
-            $total_classes_all += $total_classes;
-            $total_present_all += $present_classes;
-        }
+        $total_classes_all += $total_classes;
+        $total_present_all += $present_classes;
     }
 }
 
@@ -180,7 +247,7 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
             <div class="stats-grid">
                 <div class="stat-card" style="border-color: #3182ce;">
                     <h4>Enrolled Courses</h4>
-                    <div class="num"><?php echo count($att_summary); ?></div>
+                    <div class="num"><?php echo $enrolled_courses_count; ?></div>
                 </div>
                 <div class="stat-card" style="border-color: #38a169;">
                     <h4>Attendance Rate</h4>
@@ -273,7 +340,7 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
                         <thead>
                             <tr>
                                 <th>Title / Topic</th>
-                                <th>Course Code</th>
+                                <th>Type</th>
                                 <th>Uploaded Date</th>
                                 <th>Action</th>
                             </tr>
@@ -282,11 +349,11 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
                             <?php while ($material = $materials_res->fetch_assoc()): ?>
                                 <tr>
                                     <td><b><?php echo htmlspecialchars($material['title']); ?></b></td>
-                                    <td><?php echo htmlspecialchars($material['course_code'] ?? 'N/A'); ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($material['created_at'] ?? 'now')); ?></td>
+                                    <td><?php echo htmlspecialchars(ucfirst($material['type'] ?? 'Note')); ?></td>
+                                    <td><?php echo date('M d, Y', strtotime($material['uploaded_at'] ?? 'now')); ?></td>
                                     <td>
-                                        <?php if (!empty($material['file_name'])): ?>
-                                            <a href="uploads/<?php echo htmlspecialchars($material['file_name']); ?>" class="btn-attach" download>📥 Download</a>
+                                        <?php if (!empty($material['file_path'])): ?>
+                                            <a href="uploads/<?php echo htmlspecialchars($material['file_path']); ?>" class="btn-attach" download>📥 Download</a>
                                         <?php else: ?>
                                             <span style="color: #a0aec0;">No File</span>
                                         <?php endif; ?>
@@ -296,7 +363,7 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
                         </tbody>
                     </table>
                 <?php else: ?>
-                    <p style="color: #718096; margin-top: 10px;">No study materials or course resources uploaded yet.</p>
+                    <p style="color: #718096; margin-top: 10px;">No study materials or course resources uploaded yet for your department and batch.</p>
                 <?php endif; ?>
             </div>
 

@@ -11,7 +11,9 @@ $username = $_SESSION['username'];
 $message = '';
 $error = '';
 
-// teachers টেবিল থেকে টিচারের সকল প্রোফাইল ডাটা ফেচ করার লজিক
+// ----------------------------------------------------
+// ১. TEACHER PROFILE DATA FETCH
+// ----------------------------------------------------
 $teacher_info = [
     'teacher_id' => $username,
     'name'       => $username,
@@ -30,13 +32,65 @@ if ($t_row = $t_res->fetch_assoc()) {
     $teacher_info['email']      = !empty($t_row['email']) ? $t_row['email'] : 'N/A';
     $teacher_info['department'] = !empty($t_row['department']) ? $t_row['department'] : 'N/A';
     
-    // যদি ডাটাবেজে designation কলাম থাকে
     if (isset($t_row['designation']) && !empty($t_row['designation'])) {
         $teacher_info['designation'] = $t_row['designation'];
     }
 }
 $t_stmt->close();
 
+// ----------------------------------------------------
+// 2. CHECK-IN / CHECK-OUT SYSTEM LOGIC
+// ----------------------------------------------------
+$today_date = date('Y-m-d');
+$today_log = null;
+
+// আজকের লগ ডাটা আনা
+$chk_stmt = $conn->prepare("SELECT * FROM teacher_campus_logs WHERE teacher_id = ? AND log_date = ?");
+$chk_stmt->bind_param("ss", $username, $today_date);
+$chk_stmt->execute();
+$chk_res = $chk_stmt->get_result();
+if ($row = $chk_res->fetch_assoc()) {
+    $today_log = $row;
+}
+$chk_stmt->close();
+
+// Check-In Action
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action_check_in'])) {
+    $current_time = date('H:i:s');
+    if (!$today_log) {
+        $in_stmt = $conn->prepare("INSERT INTO teacher_campus_logs (teacher_id, log_date, check_in_time) VALUES (?, ?, ?)");
+        $in_stmt->bind_param("sss", $username, $today_date, $current_time);
+        if ($in_stmt->execute()) {
+            $message = "🟢 Checked In successfully at " . date('h:i A', strtotime($current_time));
+        } else {
+            $error = "❌ Failed to Check-In.";
+        }
+        $in_stmt->close();
+    }
+    header("Location: teacher_dashboard.php");
+    exit();
+}
+
+// Check-Out Action
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action_check_out'])) {
+    $current_time = date('H:i:s');
+    if ($today_log && empty($today_log['check_out_time'])) {
+        $out_stmt = $conn->prepare("UPDATE teacher_campus_logs SET check_out_time = ? WHERE teacher_id = ? AND log_date = ?");
+        $out_stmt->bind_param("sss", $current_time, $username, $today_date);
+        if ($out_stmt->execute()) {
+            $message = "🔴 Checked Out successfully at " . date('h:i A', strtotime($current_time));
+        } else {
+            $error = "❌ Failed to Check-Out.";
+        }
+        $out_stmt->close();
+    }
+    header("Location: teacher_dashboard.php");
+    exit();
+}
+
+// ----------------------------------------------------
+// 3. POST NOTICE LOGIC
+// ----------------------------------------------------
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['post_notice'])) {
     $title = trim($_POST['title']);
     $description = trim($_POST['description']);
@@ -69,6 +123,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['post_notice'])) {
     }
 }
 
+// ----------------------------------------------------
+// 4. DELETE NOTICE LOGIC
+// ----------------------------------------------------
 if (isset($_GET['delete_id'])) {
     $delete_id = $_GET['delete_id'];
     $stmt = $conn->prepare("DELETE FROM notices WHERE id = ?");
@@ -96,12 +153,20 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         .btn-logout { background: #dc3545; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; font-weight: bold; }
         .btn-logout:hover { background: #c82333; }
 
-        /* Profile Details Styling */
         .profile-container { margin-top: 15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; }
         .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px; }
         .profile-item { background: white; padding: 12px; border-radius: 6px; border: 1px solid #edf2f7; }
         .profile-item span { display: block; font-size: 12px; color: #718096; font-weight: bold; text-transform: uppercase; margin-bottom: 3px; }
         .profile-item p { margin: 0; font-size: 15px; color: #2d3748; font-weight: 600; }
+
+        /* Check-In Widget Style */
+        .checkin-card { background: #edf2f7; border-left: 5px solid #3182ce; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
+        .checkin-info p { margin: 0; font-size: 14px; color: #4a5568; }
+        .checkin-info b { color: #2d3748; }
+        .btn-checkin { background: #38a169; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        .btn-checkin:hover { background: #2f855a; }
+        .btn-checkout { background: #e53e3e; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        .btn-checkout:hover { background: #c53030; }
 
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .box { background: #eef2f5; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; transition: transform 0.2s ease; }
@@ -167,6 +232,29 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         </div>
     </div>
 
+    <!-- Campus Attendance Check-In / Check-Out Widget -->
+    <div class="checkin-card">
+        <div class="checkin-info">
+            <h4 style="margin:0 0 5px 0; color:#2d3748;">⏱️ Campus Attendance Log (Today: <?php echo date('d M, Y'); ?>)</h4>
+            <p>
+                <b>Check-In:</b> <?php echo (!empty($today_log['check_in_time'])) ? date('h:i A', strtotime($today_log['check_in_time'])) : '<span style="color:#e53e3e;">Not Logged Yet</span>'; ?> | 
+                <b>Check-Out:</b> <?php echo (!empty($today_log['check_out_time'])) ? date('h:i A', strtotime($today_log['check_out_time'])) : '<span style="color:#718096;">N/A</span>'; ?>
+            </p>
+        </div>
+        <div>
+            <form action="" method="POST" style="margin:0;">
+                <?php if (!$today_log): ?>
+                    <button type="submit" name="action_check_in" class="btn-checkin">🟢 Check-In</button>
+                <?php elseif (empty($today_log['check_out_time'])): ?>
+                    <button type="submit" name="action_check_out" class="btn-checkout">🔴 Check-Out</button>
+                <?php else: ?>
+                    <span style="background: #38a169; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 13px;">✅ Logged for Today</span>
+                <?php endif; ?>
+            </form>
+        </div>
+    </div>
+
+    <!-- Navigation Cards Grid -->
     <div class="grid">
         <div class="box">
             <h3>📋 <a href="manage_marks.php">Student Marks & Results</a></h3>
@@ -184,8 +272,13 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
             <h3>📂 <a href="teacher_materials.php">Course Materials</a></h3>
             <p>Upload lecture notes, assignments, and class notices.</p>
         </div>
+        <div class="box" style="border-left-color: #3182ce;">
+            <h3>🏫 <a href="room_booking.php" style="color: #3182ce;">Room Booking</a></h3>
+            <p>Book empty classrooms/labs and view schedule slots.</p>
+        </div>
     </div>
 
+    <!-- Notice Section -->
     <div class="card">
         <h3>📢 Post New Notice / Announcement</h3>
 

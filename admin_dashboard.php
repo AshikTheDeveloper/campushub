@@ -18,6 +18,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_user'])) {
     $role      = $_POST['role'];
     $full_name = trim($_POST['full_name']);
     $dept      = trim($_POST['department']);
+    $batch     = trim($_POST['batch'] ?? '');
 
     $check_user = $conn->prepare("SELECT id FROM users WHERE username = ?");
     $check_user->bind_param("s", $username);
@@ -31,14 +32,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_user'])) {
         $stmt->bind_param("ssss", $username, $email, $password, $role);
 
         if ($stmt->execute()) {
-            // Student হলে students টেবিলে ডাটা সেভ
+            // Student হলে students টেবিলে ডাটা সেভ (Batch সহ)
             if ($role === 'student') {
-                $st_stmt = $conn->prepare("INSERT INTO students (student_id, name, email, department) VALUES (?, ?, ?, ?)");
-                $st_stmt->bind_param("ssss", $username, $full_name, $email, $dept);
+                $st_stmt = $conn->prepare("INSERT INTO students (student_id, name, email, department, batch) VALUES (?, ?, ?, ?, ?)");
+                $st_stmt->bind_param("sssss", $username, $full_name, $email, $dept, $batch);
                 $st_stmt->execute();
                 $st_stmt->close();
             } 
-            // Teacher হলে teachers টেবিলে ডাটা সেভ (আপডেট করা হয়েছে)
+            // Teacher হলে teachers টেবিলে ডাটা সেভ
             else if ($role === 'teacher') {
                 $tch_stmt = $conn->prepare("INSERT INTO teachers (teacher_id, name, email, department) VALUES (?, ?, ?, ?)");
                 $tch_stmt->bind_param("ssss", $username, $full_name, $email, $dept);
@@ -71,7 +72,7 @@ if (isset($_GET['delete_id'])) {
             $del_st->bind_param("s", $u_data['username']);
             $del_st->execute();
             $del_st->close();
-        } else if ($u_data['role'] === 'teacher') { // Teacher ডিলিটের লজিক (আপডেট করা হয়েছে)
+        } else if ($u_data['role'] === 'teacher') {
             $del_tch = $conn->prepare("DELETE FROM teachers WHERE teacher_id = ?");
             $del_tch->bind_param("s", $u_data['username']);
             $del_tch->execute();
@@ -161,6 +162,7 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
             <a href="enroll_student.php" class="btn-nav btn-nav-purple">📝 Student Enrollment</a>
             <a href="students.php" class="btn-nav">🎓 Students</a>
             <a href="manage_routine.php" class="btn-nav" style="background: #2b6cb0;">🗓️ Routine</a>
+            <a href="teacher_attendance_report.php" class="btn-nav" style="background: #d69e2e;">⏱️ Teacher Attendance</a>
             <a href="change_password.php" class="btn-pass">🔑 Password</a>
             <a href="logout.php" class="logout-btn">Logout</a>
         </div>
@@ -208,7 +210,7 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
 
                 <div class="form-group">
                     <label>Username / ID:</label>
-                    <input type="text" name="username" placeholder="e.g. teacher283" required>
+                    <input type="text" name="username" placeholder="e.g. teacher283 or 211-15-101" required>
                 </div>
 
                 <div class="form-group">
@@ -219,6 +221,11 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
                 <div class="form-group">
                     <label>Department:</label>
                     <input type="text" name="department" value="CSE">
+                </div>
+
+                <div class="form-group">
+                    <label>Batch / Semester (Only for Student):</label>
+                    <input type="text" name="batch" placeholder="e.g. 60">
                 </div>
 
                 <div class="form-group">

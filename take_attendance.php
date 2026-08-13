@@ -15,14 +15,23 @@ $error = '';
 $selected_course_id = $_GET['course_id'] ?? '';
 $attendance_date = $_GET['date'] ?? date('Y-m-d');
 
-// টিচারের নিজস্ব কোর্সগুলোর লিস্ট নিয়ে আসা
+// টিচারের নিজস্ব কোর্সগুলোর লিস্ট নিয়ে আসা (Error-Safe Query)
+$my_courses = false;
 if ($_SESSION['role'] === 'admin') {
     $my_courses = $conn->query("SELECT * FROM courses ORDER BY course_code ASC");
 } else {
-    $stmt = $conn->prepare("SELECT * FROM courses WHERE teacher_id = ? ORDER BY course_code ASC");
-    $stmt->bind_param("s", $teacher_id);
-    $stmt->execute();
-    $my_courses = $stmt->get_result();
+    $stmt = $conn->prepare("SELECT * FROM courses WHERE teacher_id = ? OR instructor_id = ? ORDER BY course_code ASC");
+    if ($stmt) {
+        $stmt->bind_param("ss", $teacher_id, $teacher_id);
+        $stmt->execute();
+        $my_courses = $stmt->get_result();
+        $stmt->close();
+    }
+    
+    // যদি teacher_id / instructor_id কলাম না থাকে বা কোনো ড্রপডাউন কোর্স না আসে, তবে সব কোর্স লোড করার Fallback
+    if (!$my_courses || $my_courses->num_rows === 0) {
+        $my_courses = $conn->query("SELECT * FROM courses ORDER BY course_code ASC");
+    }
 }
 
 // অ্যাটেনডেন্স সাবমিট প্রসেস
@@ -33,13 +42,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_attendance'])) {
 
     if (!empty($attendance_data)) {
         foreach ($attendance_data as $student_id => $status) {
-            // আগের কোনো রেকর্ড থাকলে তা আপডেট হবে, না থাকলে নতুন ইনসার্ট হবে (REPLACE / ON DUPLICATE)
+            // আগের কোনো রেকর্ড থাকলে তা আপডেট হবে, না থাকলে নতুন ইনসার্ট হবে (ON DUPLICATE KEY UPDATE)
             $stmt = $conn->prepare("INSERT INTO attendance (course_id, student_id, attendance_date, status, marked_by) 
                                     VALUES (?, ?, ?, ?, ?) 
                                     ON DUPLICATE KEY UPDATE status = VALUES(status), marked_by = VALUES(marked_by)");
-            $stmt->bind_param("issss", $course_id, $student_id, $date, $status, $teacher_id);
-            $stmt->execute();
-            $stmt->close();
+            if ($stmt) {
+                $stmt->bind_param("issss", $course_id, $student_id, $date, $status, $teacher_id);
+                $stmt->execute();
+                $stmt->close();
+            }
         }
         $message = "✅ Attendance recorded successfully for date: " . htmlspecialchars($date);
     } else {
@@ -47,14 +58,78 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_attendance'])) {
     }
 }
 
-// সিলেক্ট করা কোর্সের সব স্টুডেন্টদের লিস্ট আনা
+// সিলেক্ট করা কোর্সের এনরোল্ড স্টুডেন্টদের লিস্ট ও তাদের পূর্বের সেভ করা অ্যাটেনডেন্স ডাটা আনা
 $students_res = null;
+$selected_course_info = null;
+$existing_attendance = [];
+
 if (!empty($selected_course_id)) {
-    // সিস্টেমের সব স্টুডেন্ট অথবা নির্দিষ্ট কোর্সে এনরোল্ড স্টুডেন্টদের নিয়ে আসা
-    $st_query = "SELECT s.student_id, s.name, s.department 
-                 FROM students s 
-                 ORDER BY s.student_id ASC";
-    $students_res = $conn->query($st_query);
+    // ১. আগে সিলেক্টেড কোর্সের Department এবং Batch জেনে নেওয়া (Error-Safe)
+    $c_stmt = $conn->prepare("SELECT * FROM courses WHERE id = ?");
+    if ($c_stmt) {
+        $c_stmt->bind_param("i", $selected_course_id);
+        $c_stmt->execute();
+        $c_res = $c_stmt->get_result();
+        
+        if ($c_res && $c_res->num_rows > 0) {
+            $selected_course_info = $c_res->fetch_assoc();
+            $course_dept = $selected_course_info['department'] ?? $selected_course_info['department_id'] ?? '';
+            $course_batch = $selected_course_info['batch'] ?? '';
+
+            // ২. স্টুডেন্ট ফেচ করার ক্যোয়ারি (Multi-fallback Query)
+            if (!empty($course_dept) && !empty($course_batch)) {
+                $st_stmt = $conn->prepare("SELECT s.student_id, s.name, s.department, s.batch 
+                                           FROM students s 
+                                           WHERE s.department = ? AND s.batch = ? 
+                                           ORDER BY s.student_id ASC");
+                if ($st_stmt) {
+                    $st_stmt->bind_param("ss", $course_dept, $course_batch);
+                    $st_stmt->execute();
+                    $students_res = $st_stmt->get_result();
+                }
+            } elseif (!empty($course_batch)) {
+                // ডিপার্টমেন্ট কলাম কোর্সে না থাকলে শুধু ব্যাচ দিয়ে ফিল্টার
+                $st_stmt = $conn->prepare("SELECT s.student_id, s.name, s.department, s.batch 
+                                           FROM students s 
+                                           WHERE s.batch = ? 
+                                           ORDER BY s.student_id ASC");
+                if ($st_stmt) {
+                    $st_stmt->bind_param("s", $course_batch);
+                    $st_stmt->execute();
+                    $students_res = $st_stmt->get_result();
+                }
+            } elseif (!empty($course_dept)) {
+                // শুধু ডিপার্টমেন্ট দিয়ে ফিল্টার
+                $st_stmt = $conn->prepare("SELECT s.student_id, s.name, s.department, s.batch 
+                                           FROM students s 
+                                           WHERE s.department = ? 
+                                           ORDER BY s.student_id ASC");
+                if ($st_stmt) {
+                    $st_stmt->bind_param("s", $course_dept);
+                    $st_stmt->execute();
+                    $students_res = $st_stmt->get_result();
+                }
+            }
+
+            // Fallback: যদি উপরের কোনো শর্তে স্টুডেন্ট না পাওয়া যায়, তবে ডাটাবেজের সব স্টুডেন্ট লোড করবে
+            if (!$students_res || $students_res->num_rows === 0) {
+                $students_res = $conn->query("SELECT student_id, name, department, batch FROM students ORDER BY student_id ASC");
+            }
+        }
+        $c_stmt->close();
+    }
+
+    // ৩. উক্ত তারিখ ও কোর্সের জন্য আগে থেকে জমা হওয়া অ্যাটেনডেন্স ফেচ করা
+    $att_fetch_stmt = $conn->prepare("SELECT student_id, status FROM attendance WHERE course_id = ? AND attendance_date = ?");
+    if ($att_fetch_stmt) {
+        $att_fetch_stmt->bind_param("is", $selected_course_id, $attendance_date);
+        $att_fetch_stmt->execute();
+        $att_fetch_res = $att_fetch_stmt->get_result();
+        while ($row = $att_fetch_res->fetch_assoc()) {
+            $existing_attendance[$row['student_id']] = $row['status'];
+        }
+        $att_fetch_stmt->close();
+    }
 }
 ?>
 
@@ -146,6 +221,13 @@ if (!empty($selected_course_id)) {
                 <input type="hidden" name="attendance_date" value="<?php echo htmlspecialchars($attendance_date); ?>">
 
                 <h3>Student Roll Call (Date: <?php echo htmlspecialchars($attendance_date); ?>)</h3>
+                <?php if($selected_course_info): ?>
+                    <p style="font-size: 13px; color: #718096; margin-top: -8px;">
+                        Course: <b><?php echo htmlspecialchars($selected_course_info['course_code']); ?></b> | 
+                        Dept: <b><?php echo htmlspecialchars($selected_course_info['department'] ?? $selected_course_info['department_id'] ?? 'CSE'); ?></b> | 
+                        Batch: <b><?php echo htmlspecialchars($selected_course_info['batch'] ?? 'All'); ?></b>
+                    </p>
+                <?php endif; ?>
                 
                 <table>
                     <thead>
@@ -158,28 +240,32 @@ if (!empty($selected_course_id)) {
                     </thead>
                     <tbody>
                         <?php if($students_res && $students_res->num_rows > 0): ?>
-                            <?php while($st = $students_res->fetch_assoc()): ?>
+                            <?php while($st = $students_res->fetch_assoc()): 
+                                $st_id = $st['student_id'];
+                                // ডিফল্ট 'Present', যদি ডাটাবেজে আগে রেকর্ড থাকে তবে সেটি বসবে
+                                $current_status = $existing_attendance[$st_id] ?? 'Present';
+                            ?>
                                 <tr>
-                                    <td><b><?php echo htmlspecialchars($st['student_id']); ?></b></td>
+                                    <td><b><?php echo htmlspecialchars($st_id); ?></b></td>
                                     <td><?php echo htmlspecialchars($st['name'] ?? 'N/A'); ?></td>
                                     <td><?php echo htmlspecialchars($st['department'] ?? 'CSE'); ?></td>
                                     <td>
                                         <div class="radio-group">
                                             <label class="radio-present">
-                                                <input type="radio" name="status[<?php echo $st['student_id']; ?>]" value="Present" checked> Present
+                                                <input type="radio" name="status[<?php echo $st_id; ?>]" value="Present" <?php echo ($current_status === 'Present') ? 'checked' : ''; ?>> Present
                                             </label>
                                             <label class="radio-absent">
-                                                <input type="radio" name="status[<?php echo $st['student_id']; ?>]" value="Absent"> Absent
+                                                <input type="radio" name="status[<?php echo $st_id; ?>]" value="Absent" <?php echo ($current_status === 'Absent') ? 'checked' : ''; ?>> Absent
                                             </label>
                                             <label class="radio-late">
-                                                <input type="radio" name="status[<?php echo $st['student_id']; ?>]" value="Late"> Late
+                                                <input type="radio" name="status[<?php echo $st_id; ?>]" value="Late" <?php echo ($current_status === 'Late') ? 'checked' : ''; ?>> Late
                                             </label>
                                         </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
-                            <tr><td colspan="4" style="text-align: center; color: #718096;">No students found in system.</td></tr>
+                            <tr><td colspan="4" style="text-align: center; color: #718096;">No enrolled students found for this course's department/batch.</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

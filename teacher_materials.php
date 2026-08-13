@@ -14,9 +14,11 @@ $error = '';
 
 // ১. ফাইল আপলোড করার লজিক
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_material'])) {
-    $course_id = intval($_POST['course_id']);
-    $title     = trim($_POST['title']);
-    $type      = trim($_POST['type']); // note, assignment, notice
+    $course_id  = intval($_POST['course_id']);
+    $department = trim($_POST['department']);
+    $batch      = trim($_POST['batch']);
+    $title      = trim($_POST['title']);
+    $type       = trim($_POST['type']); // note, assignment, notice
 
     // ফাইল হ্যান্ডলিং
     if (isset($_FILES['file']) && $_FILES['file']['error'] == 0) {
@@ -29,9 +31,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_material'])) {
         $target_file = $target_dir . $file_name;
 
         if (move_uploaded_file($_FILES["file"]["tmp_name"], $target_file)) {
-            $stmt = $conn->prepare("INSERT INTO course_materials (course_id, teacher_username, title, type, file_path) VALUES (?, ?, ?, ?, ?)");
+            // ডাটাবেজের কলাম সিকোয়েন্স: course_id, teacher_username, title, type, file_path, department, batch
+            $stmt = $conn->prepare("INSERT INTO course_materials (course_id, teacher_username, title, type, file_path, department, batch) VALUES (?, ?, ?, ?, ?, ?, ?)");
             if ($stmt) {
-                $stmt->bind_param("issss", $course_id, $teacher_username, $title, $type, $target_file);
+                $stmt->bind_param("issssss", $course_id, $teacher_username, $title, $type, $target_file, $department, $batch);
                 if ($stmt->execute()) {
                     $message = "✅ Material uploaded successfully!";
                 } else {
@@ -114,6 +117,16 @@ $materials_res = $materials_query->get_result();
                 </div>
 
                 <div class="form-group">
+                    <label>Department:</label>
+                    <input type="text" name="department" value="CSE" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Target Batch:</label>
+                    <input type="text" name="batch" placeholder="e.g. 61" required>
+                </div>
+
+                <div class="form-group">
                     <label>Title / Description:</label>
                     <input type="text" name="title" placeholder="e.g. Lecture 1 PDF" required>
                 </div>
@@ -143,6 +156,7 @@ $materials_res = $materials_query->get_result();
                 <thead>
                     <tr>
                         <th>Course</th>
+                        <th>Batch</th>
                         <th>Title</th>
                         <th>Type</th>
                         <th>Action</th>
@@ -153,13 +167,14 @@ $materials_res = $materials_query->get_result();
                         <?php while($m = $materials_res->fetch_assoc()): ?>
                             <tr>
                                 <td><b><?php echo htmlspecialchars($m['course_code']); ?></b></td>
+                                <td><?php echo !empty($m['batch']) ? htmlspecialchars($m['batch']) : 'N/A'; ?></td>
                                 <td><?php echo htmlspecialchars($m['title']); ?></td>
                                 <td><span class="badge badge-<?php echo $m['type']; ?>"><?php echo $m['type']; ?></span></td>
                                 <td><a href="<?php echo $m['file_path']; ?>" target="_blank">View / Download 📥</a></td>
                             </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
-                        <tr><td colspan="4" style="text-align:center; color:#777;">No materials uploaded yet.</td></tr>
+                        <tr><td colspan="5" style="text-align:center; color:#777;">No materials uploaded yet.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
