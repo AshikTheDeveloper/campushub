@@ -6,46 +6,39 @@ $error = '';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $username = trim($_POST['username']);
-    $password = trim($_POST['password']);
+    $password = md5(trim($_POST['password'])); // MD5 Encryption
 
     if (!empty($username) && !empty($password)) {
-        // ডাটাবেজ থেকে ইউজারের তথ্য আনা
-        $stmt = $conn->prepare("SELECT id, username, password, role FROM users WHERE username = ?");
-        $stmt->bind_param("s", $username);
+        $stmt = $conn->prepare("SELECT id, username, password, role FROM users WHERE username = ? AND password = ?");
+        $stmt->bind_param("ss", $username, $password);
         $stmt->execute();
         $result = $stmt->get_result();
 
-        if ($result->num_rows === 1) {
+        if ($result->num_rows == 1) {
             $user = $result->fetch_assoc();
 
             
-            if (password_verify($password, $user['password']) || $password === $user['password']) {
-                
-                
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['role'] = strtolower($user['role']);
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['role'] = $user['role'];
 
-                
-                if ($_SESSION['role'] === 'admin') {
-                    header("Location: dashboard.php");
-                } elseif ($_SESSION['role'] === 'teacher') {
-                    header("Location: teacher_dashboard.php");
-                } elseif ($_SESSION['role'] === 'student') {
-                    header("Location: student_dashboard.php");
-                } else {
-                    header("Location: dashboard.php");
-                }
+            
+            if ($user['role'] === 'admin') {
+                header("Location: admin_dashboard.php");
                 exit();
-            } else {
-                $error = "❌ Invalid password!";
+            } elseif ($user['role'] === 'teacher') {
+                header("Location: teacher_dashboard.php");
+                exit();
+            } elseif ($user['role'] === 'student') {
+                header("Location: student_dashboard.php");
+                exit();
             }
         } else {
-            $error = "❌ User not found!";
+            $error = "Invalid Username or Password!";
         }
         $stmt->close();
     } else {
-        $error = "❌ Please fill in all fields!";
+        $error = "Please fill in all fields!";
     }
 }
 ?>
@@ -56,38 +49,94 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <meta charset="UTF-8">
     <title>Login - CampusHub</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #eef2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .login-box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 380px; }
-        h2 { text-align: center; margin-bottom: 20px; color: #333; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .btn { width: 100%; background: #007bff; color: white; padding: 10px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 10px; }
-        .btn:hover { background: #0056b3; }
-        .error-msg { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; text-align: center; font-size: 14px; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #eef2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-card {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 380px;
+        }
+        .login-card h2 {
+            margin-top: 0;
+            color: #1a202c;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 5px;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e0;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        .btn-login {
+            width: 100%;
+            background: #3182ce;
+            color: white;
+            border: none;
+            padding: 11px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 15px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .btn-login:hover {
+            background: #2b6cb0;
+        }
+        .error-msg {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
 
-<div class="login-box">
-    <h2>CampusHub Login</h2>
+<div class="login-card">
+    <h2>CampusHub Login 🎓</h2>
 
-    <?php if (!empty($error)): ?>
+    <?php if(!empty($error)): ?>
         <div class="error-msg"><?php echo $error; ?></div>
     <?php endif; ?>
 
     <form action="login.php" method="POST">
         <div class="form-group">
-            <label>Username / ID:</label>
-            <input type="text" name="username" placeholder="Enter username" required>
+            <label>Username / ID</label>
+            <input type="text" name="username" placeholder="Enter your ID or username" required>
         </div>
 
         <div class="form-group">
-            <label>Password:</label>
-            <input type="password" name="password" placeholder="Enter password" required>
+            <label>Password</label>
+            <input type="password" name="password" placeholder="••••••••" required>
         </div>
 
-        <button type="submit" class="btn">Login</button>
+        <button type="submit" class="btn-login">Login 🚀</button>
     </form>
 </div>
 

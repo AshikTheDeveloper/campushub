@@ -2,7 +2,6 @@
 session_start();
 require_once 'config.php';
 
-// সিকিউরিটি চেক: টিচার হিসেবে লগইন আছে কিনা
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'teacher') {
     header("Location: login.php");
     exit();
@@ -12,15 +11,40 @@ $username = $_SESSION['username'];
 $message = '';
 $error = '';
 
-// ১. নতুন নোটিশ পোস্ট করার লজিক
+// teachers টেবিল থেকে টিচারের সকল প্রোফাইল ডাটা ফেচ করার লজিক
+$teacher_info = [
+    'teacher_id' => $username,
+    'name'       => $username,
+    'email'      => 'N/A',
+    'department' => 'N/A',
+    'designation'=> 'Faculty Member'
+];
+
+$t_stmt = $conn->prepare("SELECT * FROM teachers WHERE teacher_id = ?");
+$t_stmt->bind_param("s", $username);
+$t_stmt->execute();
+$t_res = $t_stmt->get_result();
+
+if ($t_row = $t_res->fetch_assoc()) {
+    $teacher_info['name']       = !empty($t_row['name']) ? $t_row['name'] : $username;
+    $teacher_info['email']      = !empty($t_row['email']) ? $t_row['email'] : 'N/A';
+    $teacher_info['department'] = !empty($t_row['department']) ? $t_row['department'] : 'N/A';
+    
+    // যদি ডাটাবেজে designation কলাম থাকে
+    if (isset($t_row['designation']) && !empty($t_row['designation'])) {
+        $teacher_info['designation'] = $t_row['designation'];
+    }
+}
+$t_stmt->close();
+
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['post_notice'])) {
     $title = trim($_POST['title']);
     $description = trim($_POST['description']);
-    $posted_by = "Teacher (" . $username . ")";
+    $posted_by = "Teacher (" . $teacher_info['name'] . ")";
     $file_name = null;
 
     if (!empty($title) && !empty($description)) {
-        // ফাইল আপলোড প্রসেসিং
+        
         if (isset($_FILES['attachment']) && $_FILES['attachment']['error'] == 0) {
             $target_dir = "uploads/";
             if (!is_dir($target_dir)) {
@@ -28,7 +52,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['post_notice'])) {
             }
             $file_name = time() . "_" . basename($_FILES["attachment"]["name"]);
             $target_file = $target_dir . $file_name;
-            move_uploaded_filename($_FILES["attachment"]["tmp_name"], $target_file);
+            move_uploaded_file($_FILES["attachment"]["tmp_name"], $target_file);
         }
 
         $stmt = $conn->prepare("INSERT INTO notices (title, description, posted_by, file_name) VALUES (?, ?, ?, ?)");
@@ -45,7 +69,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['post_notice'])) {
     }
 }
 
-// ২. নোটিশ ডিলিট করার লজিক
 if (isset($_GET['delete_id'])) {
     $delete_id = $_GET['delete_id'];
     $stmt = $conn->prepare("DELETE FROM notices WHERE id = ?");
@@ -56,7 +79,6 @@ if (isset($_GET['delete_id'])) {
     $stmt->close();
 }
 
-// টিচারের পোস্ট করা বা সব নোটিশ আনা
 $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC");
 ?>
 
@@ -74,12 +96,21 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         .btn-logout { background: #dc3545; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; font-weight: bold; }
         .btn-logout:hover { background: #c82333; }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .box { background: #eef2f5; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; }
-        .box h3 { margin-top: 0; color: #28a745; font-size: 18px; }
+        /* Profile Details Styling */
+        .profile-container { margin-top: 15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; }
+        .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px; }
+        .profile-item { background: white; padding: 12px; border-radius: 6px; border: 1px solid #edf2f7; }
+        .profile-item span { display: block; font-size: 12px; color: #718096; font-weight: bold; text-transform: uppercase; margin-bottom: 3px; }
+        .profile-item p { margin: 0; font-size: 15px; color: #2d3748; font-weight: 600; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .box { background: #eef2f5; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; transition: transform 0.2s ease; }
+        .box:hover { transform: translateY(-2px); }
+        .box h3 { margin-top: 0; font-size: 18px; }
+        .box h3 a { color: #28a745; text-decoration: none; }
+        .box h3 a:hover { text-decoration: underline; }
         .box p { margin-bottom: 0; font-size: 14px; color: #555; }
 
-        /* Form Styles */
         .form-group { margin-bottom: 15px; }
         label { font-weight: bold; display: block; margin-bottom: 5px; color: #333; }
         input[type="text"], textarea, input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
@@ -89,7 +120,6 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         .msg { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
         .err-msg { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
 
-        /* Notice List */
         .notice-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 15px; border-radius: 4px; margin-bottom: 10px; position: relative; }
         .notice-item h4 { margin: 0 0 5px 0; color: #333; }
         .notice-item p { margin: 0 0 8px 0; font-size: 14px; color: #555; }
@@ -104,32 +134,58 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
     <!-- Header -->
     <div class="card header">
         <h2>👨‍🏫 Teacher Portal</h2>
-        <a href="logout.php" class="btn-logout">Logout</a>
+        <div>
+            <a href="change_password.php" style="background: #4a5568; color: white; padding: 8px 14px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 13px; margin-right: 8px;">🔑 Change Password</a>
+            <a href="logout.php" class="btn-logout">Logout</a>
+        </div>
     </div>
 
-    <!-- Welcome Card -->
+    <!-- Teacher Profile Card -->
     <div class="card">
-        <h3>Welcome, Professor <?php echo htmlspecialchars($username); ?>! 👋</h3>
-        <p>You are logged in as a <b>Faculty Member</b>.</p>
+        <h3 style="margin-bottom: 5px;">Welcome, <?php echo htmlspecialchars($teacher_info['name']); ?>! 👋</h3>
+        <p style="margin-top: 0; color: #718096;">Teacher Profile & Information Details</p>
+
+        <div class="profile-container">
+            <div class="profile-grid">
+                <div class="profile-item">
+                    <span>Teacher ID</span>
+                    <p><?php echo htmlspecialchars($teacher_info['teacher_id']); ?></p>
+                </div>
+                <div class="profile-item">
+                    <span>Email Address</span>
+                    <p><?php echo htmlspecialchars($teacher_info['email']); ?></p>
+                </div>
+                <div class="profile-item">
+                    <span>Department</span>
+                    <p><?php echo htmlspecialchars($teacher_info['department']); ?></p>
+                </div>
+                <div class="profile-item">
+                    <span>Designation</span>
+                    <p><?php echo htmlspecialchars($teacher_info['designation']); ?></p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Stats / Quick Actions -->
     <div class="grid">
         <div class="box">
-            <h3>📋 Student Marks & Results</h3>
+            <h3>📋 <a href="manage_marks.php">Student Marks & Results</a></h3>
             <p>Upload exam marks, assign grades, and submit results.</p>
         </div>
         <div class="box">
-            <h3>📅 Class Attendance</h3>
+            <h3>📅 <a href="take_attendance.php">Class Attendance</a></h3>
             <p>Take daily class attendance and view attendance reports.</p>
         </div>
         <div class="box">
-            <h3>📂 Course Materials</h3>
+            <h3>🗓️ <a href="manage_routine.php">Class Routine</a></h3>
+            <p>View and manage weekly class schedules and room numbers.</p>
+        </div>
+        <div class="box">
+            <h3>📂 <a href="teacher_materials.php">Course Materials</a></h3>
             <p>Upload lecture notes, assignments, and class notices.</p>
         </div>
     </div>
 
-    <!-- Notice Publishing Section -->
     <div class="card">
         <h3>📢 Post New Notice / Announcement</h3>
 
@@ -161,7 +217,6 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         </form>
     </div>
 
-    <!-- Published Notices -->
     <div class="card">
         <h3>📋 Published Notices</h3>
 
