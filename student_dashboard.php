@@ -29,7 +29,7 @@ $batch = $student_info['batch'] ?? '';
 // ১.১. এনরোল্ড কোর্সের সংখ্যা ডাইনামিকালি বের করা (Multi-fallback Query)
 $enrolled_courses_count = 0;
 
-// প্রথম চেষ্টা: ব্যাচ অনুযায়ী কোর্স গণনা করা (courses টেবিলে batch কলাম রয়েছে)
+// প্রথম চেষ্টা: ব্যাচ অনুযায়ী কোর্স গণনা করা (courses টেবিলে batch কলাম রয়েছে)
 if (!empty($batch)) {
     $e_stmt = $conn->prepare("SELECT COUNT(*) as total FROM courses WHERE batch = ?");
     if ($e_stmt) {
@@ -43,7 +43,7 @@ if (!empty($batch)) {
     }
 }
 
-// দ্বিতীয় চেষ্টা: যদি ব্যাচ খালি বা না মিলে তবে course_enrollments টেবিল চেক করবে
+// দ্বিতীয় চেষ্টা: যদি ব্যাচ খালি বা না মিলে তবে course_enrollments টেবিল চেক করবে
 if ($enrolled_courses_count == 0) {
     $e_stmt2 = $conn->prepare("SELECT COUNT(*) as total FROM course_enrollments WHERE student_id = ? OR student_id = ?");
     if ($e_stmt2) {
@@ -57,12 +57,30 @@ if ($enrolled_courses_count == 0) {
     }
 }
 
-// তৃতীয় চেষ্টা (Fallback): নির্দিষ্ট ফিল্টার কাজ না করলে সব কোর্স গণনা করা
+// তৃতীয় চেষ্টা (Fallback): নির্দিষ্ট ফিল্টার কাজ না করলে সব কোর্স গণনা করা
 if ($enrolled_courses_count == 0) {
     $all_c = $conn->query("SELECT COUNT(*) as total FROM courses");
     if ($all_c && $all_row = $all_c->fetch_assoc()) {
         $enrolled_courses_count = $all_row['total'];
     }
+}
+
+// ১.২. স্টুডেন্টের রুম বুকিং / এক্সট্রা ক্লাস শিডিউল ফেচ করা (UPDATED QUERY)
+$today = date('Y-m-d');
+$room_schedule = false;
+
+$room_stmt = $conn->prepare("
+    SELECT rb.booking_date, rb.start_time, rb.end_time, rb.room_number, c.course_code, c.course_name 
+    FROM room_bookings rb
+    JOIN courses c ON rb.course_id = c.id
+    WHERE rb.booking_date >= ? 
+    ORDER BY rb.booking_date ASC, rb.start_time ASC
+");
+
+if ($room_stmt) {
+    $room_stmt->bind_param("s", $today);
+    $room_stmt->execute();
+    $room_schedule = $room_stmt->get_result();
 }
 
 // ২. অফিসিয়াল নোটিশ বোর্ড
@@ -95,7 +113,7 @@ $att_summary = [];
 $total_classes_all = 0;
 $total_present_all = 0;
 
-// স্টুডেন্টের ব্যাচ অনুযায়ী কোর্স ফেচ করা
+// স্টুডেন্টের ব্যাচ অনুযায়ী কোর্স ফেচ করা
 $courses_res = false;
 if (!empty($batch)) {
     $courses_stmt = $conn->prepare("SELECT * FROM courses WHERE batch = ? ORDER BY course_code ASC");
@@ -106,7 +124,7 @@ if (!empty($batch)) {
     }
 }
 
-// যদি ব্যাচ অনুযায়ী না পাওয়া যায়, সব কোর্স লোড করবে
+// যদি ব্যাচ অনুযায়ী না পাওয়া যায়, সব কোর্স লোড করবে
 if (!$courses_res || $courses_res->num_rows == 0) {
     $courses_res = $conn->query("SELECT * FROM courses ORDER BY course_code ASC");
 }
@@ -257,6 +275,49 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
                     <h4>Total Classes Attended</h4>
                     <div class="num" style="color: #b7791f;"><?php echo $total_present_all; ?> / <?php echo $total_classes_all; ?></div>
                 </div>
+            </div>
+
+            <!-- Upcoming Extra Class / Room Schedule -->
+            <div class="card">
+                <h3>📢 Upcoming Extra Class / Room Schedule</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date & Time</th>
+                            <th>Course</th>
+                            <th>Room / Lab</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($room_schedule && $room_schedule->num_rows > 0): ?>
+                            <?php while ($row = $room_schedule->fetch_assoc()): ?>
+                                <tr>
+                                    <td>
+                                        <b><?php echo date('M d, Y', strtotime($row['booking_date'])); ?></b><br>
+                                        <small style="color: #718096;">
+                                            <?php echo date('h:i A', strtotime($row['start_time'])) . ' - ' . date('h:i A', strtotime($row['end_time'])); ?>
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <b><?php echo htmlspecialchars($row['course_code']); ?></b><br>
+                                        <small style="color: #718096;"><?php echo htmlspecialchars($row['course_name']); ?></small>
+                                    </td>
+                                    <td>
+                                        <span style="background: #3182ce; color: white; padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 12px;">
+                                            <?php echo htmlspecialchars($row['room_number']); ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="3" style="text-align: center; color: #718096; padding: 15px;">
+                                    No upcoming room schedule found for your enrolled courses.
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
 
             <!-- Attendance Summary Card -->
