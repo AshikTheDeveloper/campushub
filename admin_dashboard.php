@@ -104,10 +104,42 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
     <meta charset="UTF-8">
     <title>Admin Dashboard - CampusHub</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; }
+        /* CSS Variables for Dark / Light Theme */
+        :root {
+            --bg-color: #eef2f5;
+            --card-bg: #ffffff;
+            --text-color: #2d3748;
+            --sub-text: #4a5568;
+            --header-bg: #1a202c;
+            --border-color: #e2e8f0;
+            --table-th-bg: #f7fafc;
+            --input-bg: #ffffff;
+            --input-border: #cbd5e0;
+        }
+
+        body.dark-mode {
+            --bg-color: #1a202c;
+            --card-bg: #2d3748;
+            --text-color: #f7fafc;
+            --sub-text: #cbd5e0;
+            --header-bg: #0f172a;
+            --border-color: #4a5568;
+            --table-th-bg: #374151;
+            --input-bg: #1a202c;
+            --input-border: #4a5568;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--bg-color); 
+            color: var(--text-color);
+            margin: 0; 
+            padding: 20px; 
+            transition: background 0.3s ease, color 0.3s ease;
+        }
         .container { max-width: 1100px; margin: 0 auto; }
         
-        .header { display: flex; justify-content: space-between; align-items: center; background: #1a202c; color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: var(--header-bg); color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 20px; }
         .header h2 { margin: 0; font-size: 22px; }
         
         .nav-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -117,23 +149,25 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
         .btn-nav-green:hover { background: #2f855a; }
         .btn-nav-purple { background: #805ad5; }
         .btn-nav-purple:hover { background: #6b46c1; }
+        .btn-nav-orange { background: #dd6b20; }
+        .btn-nav-orange:hover { background: #c05621; }
         .btn-pass { background: #4a5568; color: white; padding: 8px 12px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 13px; }
         .btn-pass:hover { background: #2d3748; }
         .logout-btn { background: #e53e3e; color: white; padding: 8px 14px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 13px; }
         .logout-btn:hover { background: #c53030; }
 
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 25px; }
-        .stat-card { background: white; padding: 18px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border-top: 4px solid #3182ce; }
+        .stat-card { background: var(--card-bg); padding: 18px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center; border-top: 4px solid #3182ce; border-left: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
         .stat-number { font-size: 26px; font-weight: bold; color: #2b6cb0; margin-top: 5px; }
-        .stat-label { font-size: 13px; color: #4a5568; font-weight: 600; }
+        .stat-label { font-size: 13px; color: var(--sub-text); font-weight: 600; }
 
         .main-grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .card h3 { margin-top: 0; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        .card { background: var(--card-bg); color: var(--text-color); padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid var(--border-color); }
+        .card h3 { margin-top: 0; color: var(--text-color); border-bottom: 2px solid var(--border-color); padding-bottom: 10px; }
 
         .form-group { margin-bottom: 12px; }
-        label { display: block; font-size: 13px; font-weight: bold; color: #4a5568; margin-bottom: 4px; }
-        input, select { width: 100%; padding: 9px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; }
+        label { display: block; font-size: 13px; font-weight: bold; color: var(--sub-text); margin-bottom: 4px; }
+        input, select { width: 100%; padding: 9px; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--input-border); border-radius: 6px; box-sizing: border-box; }
         .btn-add { width: 100%; background: #38a169; color: white; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 5px; }
         .btn-add:hover { background: #2f855a; }
 
@@ -141,14 +175,31 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
         .err-msg { background: #fed7d7; color: #742a2a; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
-        th { background: #f7fafc; color: #4a5568; font-weight: bold; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 14px; }
+        th { background: var(--table-th-bg); color: var(--text-color); font-weight: bold; }
         .role-badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
         .role-student { background: #ebf8ff; color: #2b6cb0; }
         .role-teacher { background: #f0fff4; color: #276749; }
         .role-admin { background: #feebc8; color: #9c4221; }
         .btn-del { color: #e53e3e; text-decoration: none; font-weight: bold; }
         .btn-del:hover { text-decoration: underline; }
+
+        /* Theme Toggle Button Style */
+        .theme-toggle-btn {
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: background 0.2s ease;
+        }
+        .theme-toggle-btn:hover { background: #718096; }
     </style>
 </head>
 <body>
@@ -158,9 +209,15 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
     <div class="header">
         <h2>CampusHub | Admin Control Panel ⚙️</h2>
         <div class="nav-btns">
+            <!-- 🌓 Dark/Light Mode Toggle Button -->
+            <button id="themeToggle" class="theme-toggle-btn">
+                <span id="themeIcon">🌙</span> <span id="themeText">Dark</span>
+            </button>
             <a href="courses.php" class="btn-nav btn-nav-green">📚 Courses & Credit</a>
             <a href="enroll_student.php" class="btn-nav btn-nav-purple">📝 Student Enrollment</a>
             <a href="students.php" class="btn-nav">🎓 Students</a>
+            <a href="manage_fees.php" class="btn-nav btn-nav-orange">💰 Manage Fees</a>
+            <a href="view_fees.php" class="btn-nav" style="background: #319795;">💳 View Fees</a>
             <a href="manage_routine.php" class="btn-nav" style="background: #2b6cb0;">🗓️ Routine</a>
             <a href="teacher_attendance_report.php" class="btn-nav" style="background: #d69e2e;">⏱️ Teacher Attendance</a>
             <a href="change_password.php" class="btn-pass">🔑 Password</a>
@@ -177,19 +234,19 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
 
     <!-- Top Summary Cards -->
     <div class="stats-grid">
-        <div class="stat-card" style="border-color: #3182ce;">
+        <div class="stat-card" style="border-top-color: #3182ce;">
             <div class="stat-label">Total Students</div>
             <div class="stat-number"><?php echo $total_students; ?></div>
         </div>
-        <div class="stat-card" style="border-color: #38a169;">
+        <div class="stat-card" style="border-top-color: #38a169;">
             <div class="stat-label">Total Teachers</div>
             <div class="stat-number" style="color: #2f855a;"><?php echo $total_teachers; ?></div>
         </div>
-        <div class="stat-card" style="border-color: #805ad5;">
+        <div class="stat-card" style="border-top-color: #805ad5;">
             <div class="stat-label">Active Courses</div>
             <div class="stat-number" style="color: #6b46c1;"><?php echo $total_courses; ?></div>
         </div>
-        <div class="stat-card" style="border-color: #d69e2e;">
+        <div class="stat-card" style="border-top-color: #d69e2e;">
             <div class="stat-label">Course Registrations</div>
             <div class="stat-number" style="color: #b7791f;"><?php echo $total_enrolls; ?></div>
         </div>
@@ -284,6 +341,39 @@ $all_users = $conn->query("SELECT * FROM users ORDER BY id DESC");
         </div>
     </div>
 </div>
+
+<!-- JavaScript for Dark/Light Mode Persistence -->
+<script>
+    const themeToggleBtn = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
+    const themeText = document.getElementById('themeText');
+
+    // ১. LocalStorage চেক করে থিম সেট করা
+    if (localStorage.getItem('theme') === 'dark') {
+        document.body.classList.add('dark-mode');
+        if(themeIcon) themeIcon.textContent = '☀️';
+        if(themeText) themeText.textContent = 'Light';
+    }
+
+    // ২. বাটনে ক্লিকে ডার্ক/লাইট সুইচ লজিক
+    if(themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+            let theme = 'light';
+            
+            if (document.body.classList.contains('dark-mode')) {
+                theme = 'dark';
+                themeIcon.textContent = '☀️';
+                themeText.textContent = 'Light';
+            } else {
+                themeIcon.textContent = '🌙';
+                themeText.textContent = 'Dark';
+            }
+            // LocalStorage-এ স্টেট সংরক্ষণ
+            localStorage.setItem('theme', theme);
+        });
+    }
+</script>
 
 </body>
 </html>

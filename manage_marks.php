@@ -12,26 +12,35 @@ $teacher_username = $_SESSION['username'];
 $message = '';
 $error = '';
 
+// Fetch Assigned Courses for this specific teacher
+$courses_query = "SELECT course_code, course_name FROM courses WHERE assigned_teacher = ?";
+$stmt_courses = $conn->prepare($courses_query);
+$stmt_courses->bind_param("s", $teacher_username);
+$stmt_courses->execute();
+$courses_res = $stmt_courses->get_result();
+
 // ১. Marks Entry/Submit Logic
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_marks'])) {
     $student_id = trim($_POST['student_id']);
-    $course_code = trim($_POST['course_code']);
-    $course_name = trim($_POST['course_name']);
+    $course_info = trim($_POST['course_info']); // Contains "course_code|course_name"
     $marks = intval($_POST['marks']);
 
-    // Grade Calculation Logic
-    $grade = 'F';
-    if ($marks >= 80) $grade = 'A+';
-    elseif ($marks >= 75) $grade = 'A';
-    elseif ($marks >= 70) $grade = 'A-';
-    elseif ($marks >= 65) $grade = 'B+';
-    elseif ($marks >= 60) $grade = 'B';
-    elseif ($marks >= 55) $grade = 'B-';
-    elseif ($marks >= 50) $grade = 'C+';
-    elseif ($marks >= 45) $grade = 'C';
-    elseif ($marks >= 40) $grade = 'D';
+    if (!empty($student_id) && !empty($course_info)) {
+        // Extract course_code and course_name from selected dropdown value
+        list($course_code, $course_name) = explode('|', $course_info);
 
-    if (!empty($student_id) && !empty($course_code) && !empty($course_name)) {
+        // Grade Calculation Logic
+        $grade = 'F';
+        if ($marks >= 80) $grade = 'A+';
+        elseif ($marks >= 75) $grade = 'A';
+        elseif ($marks >= 70) $grade = 'A-';
+        elseif ($marks >= 65) $grade = 'B+';
+        elseif ($marks >= 60) $grade = 'B';
+        elseif ($marks >= 55) $grade = 'B-';
+        elseif ($marks >= 50) $grade = 'C+';
+        elseif ($marks >= 45) $grade = 'C';
+        elseif ($marks >= 40) $grade = 'D';
+
         $stmt = $conn->prepare("INSERT INTO marks (student_id, course_code, course_name, marks, grade, posted_by) VALUES (?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("sssiss", $student_id, $course_code, $course_name, $marks, $grade, $teacher_username);
 
@@ -59,11 +68,24 @@ if (isset($_GET['delete_mark_id'])) {
     $del_stmt->close();
 }
 
-// Fetch all registered students for dropdown
-$students_res = $conn->query("SELECT student_id, name FROM students ORDER BY student_id ASC");
+// Fetch students based on assigned course batches for this teacher
+$students_query = "
+    SELECT DISTINCT s.student_id, s.name 
+    FROM students s
+    JOIN courses c ON s.batch = c.batch
+    WHERE c.assigned_teacher = ?
+    ORDER BY s.student_id ASC
+";
+$stmt_std = $conn->prepare($students_query);
+$stmt_std->bind_param("s", $teacher_username);
+$stmt_std->execute();
+$students_res = $stmt_std->get_result();
 
-// Fetch marks posted by this teacher or all marks
-$marks_list = $conn->query("SELECT * FROM marks ORDER BY id DESC");
+// Fetch marks posted by this teacher only
+$stmt_marks = $conn->prepare("SELECT * FROM marks WHERE posted_by = ? ORDER BY id DESC");
+$stmt_marks->bind_param("s", $teacher_username);
+$stmt_marks->execute();
+$marks_list = $stmt_marks->get_result();
 ?>
 
 <!DOCTYPE html>
@@ -130,18 +152,26 @@ $marks_list = $conn->query("SELECT * FROM marks ORDER BY id DESC");
                                     <?php echo htmlspecialchars($st['student_id'] . " - " . $st['name']); ?>
                                 </option>
                             <?php endwhile; ?>
+                        <?php else: ?>
+                            <option value="" disabled>No Students Found in Assigned Batches</option>
                         <?php endif; ?>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label>Course Code:</label>
-                    <input type="text" name="course_code" placeholder="e.g. CSE-213" required>
-                </div>
-
-                <div class="form-group">
-                    <label>Course Name:</label>
-                    <input type="text" name="course_name" placeholder="e.g. Algorithms" required>
+                    <label>Select Course:</label>
+                    <select name="course_info" required>
+                        <option value="">-- Choose Course --</option>
+                        <?php if ($courses_res && $courses_res->num_rows > 0): ?>
+                            <?php while ($crs = $courses_res->fetch_assoc()): ?>
+                                <option value="<?php echo htmlspecialchars($crs['course_code'] . '|' . $crs['course_name']); ?>">
+                                    <?php echo htmlspecialchars($crs['course_code'] . " - " . $crs['course_name']); ?>
+                                </option>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <option value="" disabled>No Courses Assigned</option>
+                        <?php endif; ?>
+                    </select>
                 </div>
 
                 <div class="form-group">

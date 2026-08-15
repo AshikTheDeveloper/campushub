@@ -12,7 +12,7 @@ $message = '';
 $error = '';
 
 // ----------------------------------------------------
-// ১. TEACHER PROFILE DATA FETCH
+// 1. TEACHER PROFILE DATA FETCH
 // ----------------------------------------------------
 $teacher_info = [
     'teacher_id' => $username,
@@ -137,6 +137,62 @@ if (isset($_GET['delete_id'])) {
 }
 
 $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC");
+
+// ----------------------------------------------------
+// 5. STATS CALCULATIONS
+// ----------------------------------------------------
+// Total Assigned Courses
+$stmt_c = $conn->prepare("SELECT COUNT(*) as total FROM courses WHERE assigned_teacher = ?");
+$stmt_c->bind_param("s", $username);
+$stmt_c->execute();
+$total_courses = $stmt_c->get_result()->fetch_assoc()['total'] ?? 0;
+$stmt_c->close();
+
+// Today's Avg Attendance (%)
+$stmt_att = $conn->prepare("
+    SELECT 
+        COUNT(*) as total_records,
+        SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) as present_count
+    FROM attendance 
+    WHERE marked_by = ? AND attendance_date = ?
+");
+$stmt_att->bind_param("ss", $username, $today_date);
+$stmt_att->execute();
+$att_data = $stmt_att->get_result()->fetch_assoc();
+$stmt_att->close();
+
+$avg_attendance = "N/A";
+if ($att_data['total_records'] > 0) {
+    $percentage = ($att_data['present_count'] / $att_data['total_records']) * 100;
+    $avg_attendance = round($percentage, 1) . '%';
+}
+
+// ----------------------------------------------------
+// 6. TODAY'S ROUTINE FETCH
+// ----------------------------------------------------
+$today_day = date('l');
+$stmt_routine = $conn->prepare("SELECT * FROM routines WHERE day = ? ORDER BY time_slot ASC");
+$stmt_routine->bind_param("s", $today_day);
+$stmt_routine->execute();
+$today_classes = $stmt_routine->get_result();
+
+// ----------------------------------------------------
+// 7. PENDING COUNSELING APPOINTMENTS COUNT
+// ----------------------------------------------------
+$total_pending_appointments = 0;
+$stmt_p = $conn->prepare("
+    SELECT COUNT(b.id) as total_pending 
+    FROM slot_bookings b
+    JOIN teacher_slots ts ON b.slot_id = ts.id
+    WHERE ts.teacher_username = ? AND b.status = 'pending'
+");
+if ($stmt_p) {
+    $stmt_p->bind_param("s", $username);
+    $stmt_p->execute();
+    $p_res = $stmt_p->get_result()->fetch_assoc();
+    $total_pending_appointments = $p_res['total_pending'] ?? 0;
+    $stmt_p->close();
+}
 ?>
 
 <!DOCTYPE html>
@@ -145,52 +201,125 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
     <meta charset="UTF-8">
     <title>Teacher Portal - CampusHub</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+        /* Light/Dark Mode CSS Variables */
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --text-color: #2d3748;
+            --sub-text: #718096;
+            --header-bg: #1a202c;
+            --border-color: #e2e8f0;
+            --profile-bg: #f8fafc;
+            --item-bg: #f8f9fa;
+            --box-bg: #eef2f5;
+            --input-bg: #ffffff;
+            --input-border: #ccc;
+            --table-th: #f7fafc;
+        }
+
+        body.dark-mode {
+            --bg-color: #1a202c;
+            --card-bg: #2d3748;
+            --text-color: #f7fafc;
+            --sub-text: #cbd5e0;
+            --header-bg: #0f172a;
+            --border-color: #4a5568;
+            --profile-bg: #374151;
+            --item-bg: #374151;
+            --box-bg: #374151;
+            --input-bg: #1a202c;
+            --input-border: #4a5568;
+            --table-th: #374151;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--bg-color); 
+            color: var(--text-color);
+            margin: 0; 
+            padding: 20px; 
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
         .container { max-width: 1000px; margin: auto; }
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .header { display: flex; justify-content: space-between; align-items: center; background: #1a202c; color: white; }
+        .card { background: var(--card-bg); color: var(--text-color); padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; border: 1px solid var(--border-color); }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; background: var(--header-bg); color: white; border: none; }
         .header h2 { margin: 0; font-size: 22px; }
         .btn-logout { background: #dc3545; color: white; padding: 8px 15px; text-decoration: none; border-radius: 4px; font-weight: bold; }
         .btn-logout:hover { background: #c82333; }
 
-        .profile-container { margin-top: 15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 18px; border-radius: 8px; }
+        .profile-container { margin-top: 15px; background: var(--profile-bg); border: 1px solid var(--border-color); padding: 18px; border-radius: 8px; }
         .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 10px; }
-        .profile-item { background: white; padding: 12px; border-radius: 6px; border: 1px solid #edf2f7; }
-        .profile-item span { display: block; font-size: 12px; color: #718096; font-weight: bold; text-transform: uppercase; margin-bottom: 3px; }
-        .profile-item p { margin: 0; font-size: 15px; color: #2d3748; font-weight: 600; }
+        .profile-item { background: var(--card-bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); }
+        .profile-item span { display: block; font-size: 12px; color: var(--sub-text); font-weight: bold; text-transform: uppercase; margin-bottom: 3px; }
+        .profile-item p { margin: 0; font-size: 15px; color: var(--text-color); font-weight: 600; }
+
+        /* Stats Cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: var(--card-bg); padding: 18px; border-radius: 8px; border-left: 5px solid #3182ce; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stat-card.green { border-left-color: #38a169; }
+        .stat-card.purple { border-left-color: #805ad5; }
+        .stat-number { font-size: 24px; font-weight: bold; margin-top: 5px; }
+        .stat-label { font-size: 12px; color: var(--sub-text); font-weight: 600; text-transform: uppercase; }
 
         /* Check-In Widget Style */
-        .checkin-card { background: #edf2f7; border-left: 5px solid #3182ce; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
-        .checkin-info p { margin: 0; font-size: 14px; color: #4a5568; }
-        .checkin-info b { color: #2d3748; }
+        .checkin-card { background: var(--box-bg); border-left: 5px solid #3182ce; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+        .checkin-info p { margin: 0; font-size: 14px; color: var(--sub-text); }
+        .checkin-info b { color: var(--text-color); }
         .btn-checkin { background: #38a169; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
         .btn-checkin:hover { background: #2f855a; }
         .btn-checkout { background: #e53e3e; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px; }
         .btn-checkout:hover { background: #c53030; }
 
+        /* Routine Table Style */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); font-size: 14px; }
+        th { background: var(--table-th); }
+        .btn-action { background: #38a169; color: white; padding: 6px 10px; text-decoration: none; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .btn-action:hover { background: #2f855a; }
+
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 20px; }
-        .box { background: #eef2f5; padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; transition: transform 0.2s ease; }
+        .box { background: var(--box-bg); padding: 20px; border-radius: 8px; border-left: 5px solid #28a745; transition: transform 0.2s ease; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
         .box:hover { transform: translateY(-2px); }
         .box h3 { margin-top: 0; font-size: 18px; }
         .box h3 a { color: #28a745; text-decoration: none; }
         .box h3 a:hover { text-decoration: underline; }
-        .box p { margin-bottom: 0; font-size: 14px; color: #555; }
+        .box p { margin-bottom: 0; font-size: 14px; color: var(--sub-text); }
 
         .form-group { margin-bottom: 15px; }
-        label { font-weight: bold; display: block; margin-bottom: 5px; color: #333; }
-        input[type="text"], textarea, input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; color: var(--text-color); }
+        input[type="text"], textarea, input[type="file"] { width: 100%; padding: 10px; background: var(--input-bg); color: var(--text-color); border: 1px solid var(--input-border); border-radius: 4px; box-sizing: border-box; }
         .btn-submit { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 15px; }
         .btn-submit:hover { background: #218838; }
 
         .msg { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
         .err-msg { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
 
-        .notice-item { background: #f8f9fa; border-left: 4px solid #007bff; padding: 15px; border-radius: 4px; margin-bottom: 10px; position: relative; }
-        .notice-item h4 { margin: 0 0 5px 0; color: #333; }
-        .notice-item p { margin: 0 0 8px 0; font-size: 14px; color: #555; }
-        .notice-meta { font-size: 12px; color: #888; }
+        .notice-item { background: var(--item-bg); border-left: 4px solid #007bff; padding: 15px; border-radius: 4px; margin-bottom: 10px; position: relative; border-top: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+        .notice-item h4 { margin: 0 0 5px 0; color: var(--text-color); }
+        .notice-item p { margin: 0 0 8px 0; font-size: 14px; color: var(--sub-text); }
+        .notice-meta { font-size: 12px; color: var(--sub-text); }
         .btn-delete { color: #dc3545; text-decoration: none; font-weight: bold; font-size: 13px; float: right; }
         .btn-delete:hover { text-decoration: underline; }
+
+        /* Theme Toggle Button Style */
+        .theme-toggle-btn {
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            margin-right: 8px;
+            transition: background 0.2s ease;
+        }
+        .theme-toggle-btn:hover { background: #718096; }
     </style>
 </head>
 <body>
@@ -200,6 +329,10 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
     <div class="card header">
         <h2>👨‍🏫 Teacher Portal</h2>
         <div>
+            <!-- 🌓 Dark/Light Mode Toggle Button -->
+            <button id="themeToggle" class="theme-toggle-btn">
+                <span id="themeIcon">🌙</span> <span id="themeText">Dark</span>
+            </button>
             <a href="change_password.php" style="background: #4a5568; color: white; padding: 8px 14px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 13px; margin-right: 8px;">🔑 Change Password</a>
             <a href="logout.php" class="btn-logout">Logout</a>
         </div>
@@ -208,7 +341,7 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
     <!-- Teacher Profile Card -->
     <div class="card">
         <h3 style="margin-bottom: 5px;">Welcome, <?php echo htmlspecialchars($teacher_info['name']); ?>! 👋</h3>
-        <p style="margin-top: 0; color: #718096;">Teacher Profile & Information Details</p>
+        <p style="margin-top: 0; color: var(--sub-text);">Teacher Profile & Information Details</p>
 
         <div class="profile-container">
             <div class="profile-grid">
@@ -232,13 +365,29 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         </div>
     </div>
 
+    <!-- Quick Stats Overview -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Assigned Courses</div>
+            <div class="stat-number" style="color: #3182ce;"><?php echo $total_courses; ?></div>
+        </div>
+        <div class="stat-card green">
+            <div class="stat-label">Today's Avg Attendance</div>
+            <div class="stat-number" style="color: #38a169;"><?php echo $avg_attendance; ?></div>
+        </div>
+        <div class="stat-card purple">
+            <div class="stat-label">Pending Counseling Requests</div>
+            <div class="stat-number" style="color: #805ad5;"><?php echo $total_pending_appointments; ?></div>
+        </div>
+    </div>
+
     <!-- Campus Attendance Check-In / Check-Out Widget -->
     <div class="checkin-card">
         <div class="checkin-info">
-            <h4 style="margin:0 0 5px 0; color:#2d3748;">⏱️ Campus Attendance Log (Today: <?php echo date('d M, Y'); ?>)</h4>
+            <h4 style="margin:0 0 5px 0; color: var(--text-color);">⏱️ Campus Attendance Log (Today: <?php echo date('d M, Y'); ?>)</h4>
             <p>
                 <b>Check-In:</b> <?php echo (!empty($today_log['check_in_time'])) ? date('h:i A', strtotime($today_log['check_in_time'])) : '<span style="color:#e53e3e;">Not Logged Yet</span>'; ?> | 
-                <b>Check-Out:</b> <?php echo (!empty($today_log['check_out_time'])) ? date('h:i A', strtotime($today_log['check_out_time'])) : '<span style="color:#718096;">N/A</span>'; ?>
+                <b>Check-Out:</b> <?php echo (!empty($today_log['check_out_time'])) ? date('h:i A', strtotime($today_log['check_out_time'])) : '<span style="color:var(--sub-text);">N/A</span>'; ?>
             </p>
         </div>
         <div>
@@ -252,6 +401,39 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
                 <?php endif; ?>
             </form>
         </div>
+    </div>
+
+    <!-- Today's Class Schedule -->
+    <div class="card">
+        <h3 style="margin-top: 0;">📅 Today's Class Schedule (<?php echo date('l, d M Y'); ?>)</h3>
+        <?php if ($today_classes && $today_classes->num_rows > 0): ?>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time Slot</th>
+                        <th>Course Code</th>
+                        <th>Course Name</th>
+                        <th>Room No</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php while ($class = $today_classes->fetch_assoc()): ?>
+                        <tr>
+                            <td><b><?php echo htmlspecialchars($class['time_slot']); ?></b></td>
+                            <td><span style="background: #ebf8ff; color: #2b6cb0; padding: 3px 8px; border-radius: 4px; font-weight: bold;"><?php echo htmlspecialchars($class['course_code']); ?></span></td>
+                            <td><?php echo htmlspecialchars($class['course_name']); ?></td>
+                            <td><span style="background: #feebc8; color: #9c4221; padding: 3px 8px; border-radius: 4px; font-weight: bold;"><?php echo htmlspecialchars($class['room_no']); ?></span></td>
+                            <td>
+                                <a href="take_attendance.php?course=<?php echo urlencode($class['course_code']); ?>" class="btn-action">Take Attendance</a>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                </tbody>
+            </table>
+        <?php else: ?>
+            <p style="color: var(--sub-text); margin: 10px 0 0 0;">🎉 No classes scheduled for today (<?php echo $today_day; ?>)!</p>
+        <?php endif; ?>
     </div>
 
     <!-- Navigation Cards Grid -->
@@ -275,6 +457,10 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
         <div class="box" style="border-left-color: #3182ce;">
             <h3>🏫 <a href="room_booking.php" style="color: #3182ce;">Room Booking</a></h3>
             <p>Book empty classrooms/labs and view schedule slots.</p>
+        </div>
+        <div class="box" style="border-left-color: #805ad5;">
+            <h3>🤝 <a href="teacher_slots.php" style="color: #805ad5;">Office Hours & Counseling</a></h3>
+            <p>Set weekly available slots and review student appointments.</p>
         </div>
     </div>
 
@@ -326,10 +512,43 @@ $notices_result = $conn->query("SELECT * FROM notices ORDER BY created_at DESC")
                 </div>
             <?php endwhile; ?>
         <?php else: ?>
-            <p style="color: #777;">No notices posted yet.</p>
+            <p style="color: var(--sub-text);">No notices posted yet.</p>
         <?php endif; ?>
     </div>
 </div>
+
+<!-- JavaScript for Dark/Light Mode Persistence -->
+<script>
+    const themeToggleBtn = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
+    const themeText = document.getElementById('themeText');
+
+    // ১. LocalStorage চেক করে পূর্বের থিম সিলেক্ট রাখা
+    if (localStorage.getItem('theme') === 'dark') {
+        document.body.classList.add('dark-mode');
+        if(themeIcon) themeIcon.textContent = '☀️';
+        if(themeText) themeText.textContent = 'Light';
+    }
+
+    // ২. বাটনে ক্লিকে ডার্ক/লাইট টগল লজিক
+    if(themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+            let theme = 'light';
+            
+            if (document.body.classList.contains('dark-mode')) {
+                theme = 'dark';
+                themeIcon.textContent = '☀️';
+                themeText.textContent = 'Light';
+            } else {
+                themeIcon.textContent = '🌙';
+                themeText.textContent = 'Dark';
+            }
+            // LocalStorage-এ পছন্দ সংরক্ষণ
+            localStorage.setItem('theme', theme);
+        });
+    }
+</script>
 
 </body>
 </html>
