@@ -10,7 +10,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 $message = '';
 $error = '';
 
-// ১. কোর্স অ্যাড করার লজিক
+// ১. কোর্স অ্যাড করার লজিক (অটো-এনরোলমেন্টসহ)
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_course'])) {
     $course_code = trim($_POST['course_code']);
     $course_name = trim($_POST['course_name']);
@@ -48,7 +48,32 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_course'])) {
             if ($stmt) {
                 $stmt->bind_param("ssdiss", $course_code, $course_name, $credits, $dept_id, $teacher, $batch);
                 if ($stmt->execute()) {
-                    $message = "✅ Course added successfully with teacher assignment!";
+                    // নতুন তৈরি হওয়া কোর্সটির ID নিয়ে আসা
+                    $new_course_id = $stmt->insert_id; 
+
+                    // ওই ব্যাচের সব স্টুডেন্টকে খুঁজে বের করে অটো-এনরোল করানো
+                    $get_students = $conn->prepare("SELECT student_id FROM students WHERE batch = ?");
+                    if ($get_students) {
+                        $get_students->bind_param("s", $batch);
+                        $get_students->execute();
+                        $students_result = $get_students->get_result();
+
+                        if ($students_result->num_rows > 0) {
+                            $enroll_stmt = $conn->prepare("INSERT INTO course_enrollments (student_id, course_id) VALUES (?, ?)");
+                            if ($enroll_stmt) {
+                                while ($row = $students_result->fetch_assoc()) {
+                                    $student_id = $row['student_id'];
+                                    // ডুপ্লিকেট এন্ট্রি এড়াতে IGNORE ব্যবহার করা যেতে পারে অথবা সরাসরি ইনসার্ট
+                                    $enroll_stmt->bind_param("si", $student_id, $new_course_id);
+                                    $enroll_stmt->execute();
+                                }
+                                $enroll_stmt->close();
+                            }
+                        }
+                        $get_students->close();
+                    }
+
+                    $message = "✅ Course added and all students of batch $batch auto-enrolled successfully!";
                 } else {
                     $error = "❌ Failed to add course: " . $stmt->error;
                 }

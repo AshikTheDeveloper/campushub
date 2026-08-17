@@ -25,6 +25,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_slot'])) {
     $stmt->close();
 }
 
+// Status Update Logic (Approve / Reject)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_status'])) {
+    $booking_id = intval($_POST['booking_id']);
+    $new_status = $_POST['status']; // 'approved' or 'rejected'
+
+    $update_stmt = $conn->prepare("UPDATE slot_bookings SET status = ? WHERE id = ?");
+    $update_stmt->bind_param("si", $new_status, $booking_id);
+    if ($update_stmt->execute()) {
+        $msg = "✅ Appointment status updated successfully!";
+    }
+    $update_stmt->close();
+}
+
 // Fetch Existing Slots
 $stmt_slots = $conn->prepare("SELECT * FROM teacher_slots WHERE teacher_username = ? ORDER BY FIELD(day_of_week, 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')");
 $stmt_slots->bind_param("s", $teacher_username);
@@ -60,6 +73,8 @@ $bookings_res = $stmt_b->get_result();
         .btn { background: #3182ce; color: white; border: none; padding: 10px; width: 100%; font-weight: bold; cursor: pointer; border-radius: 4px; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; font-size: 13px; }
+        .btn-approve { background: #38a169; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 11px; }
+        .btn-reject { background: #e53e3e; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -108,7 +123,7 @@ $bookings_res = $stmt_b->get_result();
                     <th>Date</th>
                     <th>Time Slot</th>
                     <th>Reason</th>
-                    <th>Status</th>
+                    <th>Status / Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -118,7 +133,18 @@ $bookings_res = $stmt_b->get_result();
                     <td><?php echo $b['booking_date']; ?></td>
                     <td><?php echo $b['day_of_week'] . ' (' . date("g:i A", strtotime($b['start_time'])) . ' - ' . date("g:i A", strtotime($b['end_time'])) . ')'; ?></td>
                     <td><?php echo htmlspecialchars($b['reason']); ?></td>
-                    <td><b><?php echo ucfirst($b['status']); ?></b></td>
+                    <td>
+                        <?php if ($b['status'] == 'pending'): ?>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="booking_id" value="<?php echo $b['id']; ?>">
+                                <button type="submit" name="update_status" value="update_status" onclick="this.form.status.value='approved';" class="btn-approve">Approve</button>
+                                <button type="submit" name="update_status" value="update_status" onclick="this.form.status.value='rejected';" class="btn-reject">Reject</button>
+                                <input type="hidden" name="status" value="">
+                            </form>
+                        <?php else: ?>
+                            <b><?php echo ucfirst($b['status']); ?></b>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php endwhile; ?>
             </tbody>

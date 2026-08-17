@@ -65,39 +65,22 @@ if ($enrolled_courses_count == 0) {
     }
 }
 
-// ১.২. স্টুডেন্টের রুম বুকিং / এক্সট্রা ক্লাস শিডিউল ফেচ করা (UPDATED QUERY FOR BATCH & DEPT MATCHING WITH FALLBACK)
+// ১.২. স্টুডেন্টের রুম বুকিং / এক্সট্রা ক্লাস শিডিউল ফেচ করা (Updated & Simple)
 $today = date('Y-m-d');
-$room_schedule = false;
+$room_stmt = $conn->prepare("
+    SELECT rb.booking_date, rb.start_time, rb.end_time, rb.room_number, c.course_code, c.course_name 
+    FROM room_bookings rb
+    LEFT JOIN courses c ON rb.course_id = c.id
+    WHERE rb.booking_date >= ?
+    ORDER BY rb.booking_date ASC, rb.start_time ASC
+");
 
-if (!empty($batch)) {
-    $room_stmt = $conn->prepare("
-        SELECT rb.booking_date, rb.start_time, rb.end_time, rb.room_number, c.course_code, c.course_name 
-        FROM room_bookings rb
-        JOIN courses c ON rb.course_id = c.id
-        WHERE rb.booking_date >= ? 
-          AND LOWER(c.department) = LOWER(?) 
-          AND (c.batch = '' OR LOWER(c.batch) = LOWER(?))
-        ORDER BY rb.booking_date ASC, rb.start_time ASC
-    ");
-    if ($room_stmt) {
-        $room_stmt->bind_param("sss", $today, $dept, $batch);
-        $room_stmt->execute();
-        $room_schedule = $room_stmt->get_result();
-    }
+if ($room_stmt) {
+    $room_stmt->bind_param("s", $today);
+    $room_stmt->execute();
+    $room_schedule = $room_stmt->get_result();
 } else {
-    $room_stmt = $conn->prepare("
-        SELECT rb.booking_date, rb.start_time, rb.end_time, rb.room_number, c.course_code, c.course_name 
-        FROM room_bookings rb
-        JOIN courses c ON rb.course_id = c.id
-        WHERE rb.booking_date >= ? 
-          AND LOWER(c.department) = LOWER(?)
-        ORDER BY rb.booking_date ASC, rb.start_time ASC
-    ");
-    if ($room_stmt) {
-        $room_stmt->bind_param("ss", $today, $dept);
-        $room_stmt->execute();
-        $room_schedule = $room_stmt->get_result();
-    }
+    $room_schedule = false;
 }
 
 // ১.৩. স্টুডেন্টের ফি সংক্রান্ত ডিউ (Due) হিসাব করা (UPDATED LOGIC FOR BATCH_FEES & PAYMENTS TABLES)
@@ -289,6 +272,10 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
         .btn-fee { display: block; text-align: center; background: #38a169; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; margin-top: 10px; transition: background 0.2s ease; }
         .btn-fee:hover { background: #2f855a; }
 
+        /* 🕒 Teacher Office Hours Button */
+        .btn-office-hours { display: block; text-align: center; background: #805ad5; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 14px; margin-top: 10px; transition: background 0.2s ease; }
+        .btn-office-hours:hover { background: #6b46c1; }
+
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: var(--card-bg); padding: 15px; border-radius: 10px; text-align: center; border-top: 4px solid #3182ce; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
         .stat-card h4 { margin: 0; font-size: 11px; color: var(--sub-text); text-transform: uppercase; }
@@ -367,6 +354,9 @@ $overall_attendance = ($total_classes_all > 0) ? round(($total_present_all / $to
                 
                 <!-- 💳 My Fees & Payments Button -->
                 <a href="view_fees.php" class="btn-fee">💳 My Fees & Payments</a>
+
+                <!-- 🕒 Teacher Office Hours & Appointments Button -->
+                <a href="book_slot.php" class="btn-office-hours">🕒 Teacher Office Hours</a>
             </div>
         </div>
 

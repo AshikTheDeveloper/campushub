@@ -11,13 +11,13 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 $message = '';
 $error = '';
 
-// স্টুডেন্টদের লিস্ট আনা
+// স্টুডেন্টদের লিস্ট আনা (ফর্মের ড্রপডাউনের জন্য)
 $students_res = $conn->query("SELECT student_id, name, department FROM students ORDER BY student_id ASC");
 
-// কোর্সের লিস্ট আনা
-$courses_res = $conn->query("SELECT id, course_code, course_name, credit FROM courses ORDER BY course_code ASC");
+// কোর্সের লিস্ট আনা (ফর্মের ড্রপডাউনের জন্য)
+$courses_res = $conn->query("SELECT id, course_code, course_name, credits FROM courses ORDER BY course_code ASC");
 
-// এনরোল সাবমিট প্রসেস
+// এনরোল সাবমিট প্রসেস (ম্যানুয়াল অ্যাসাইনমেন্ট)
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['enroll_student'])) {
     $student_id = trim($_POST['student_id']);
     $course_id  = intval($_POST['course_id']);
@@ -46,7 +46,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['enroll_student'])) {
     }
 }
 
-// এনরোলমেন্ট ডিলিট
+// এনরোলমেন্ট ডিলিট / ড্রপ করার লজিক
 if (isset($_GET['delete_id'])) {
     $del_id = intval($_GET['delete_id']);
     $del_stmt = $conn->prepare("DELETE FROM course_enrollments WHERE id = ?");
@@ -57,12 +57,13 @@ if (isset($_GET['delete_id'])) {
     $del_stmt->close();
 }
 
-// সকল এনরোলমেন্টের লিস্ট
+// সকল স্টুডেন্ট ও তাদের এনরোল করা কোর্সের লিস্ট ফেচ করা (JOIN কুয়েরি)
 $enrollments_res = $conn->query("
-    SELECT ce.id, ce.student_id, c.course_code, c.course_name, c.credit, ce.enrolled_at 
+    SELECT ce.id, s.student_id, s.name AS student_name, s.department, c.course_code, c.course_name, c.credits, ce.enrolled_at 
     FROM course_enrollments ce
+    JOIN students s ON ce.student_id = s.student_id
     JOIN courses c ON ce.course_id = c.id
-    ORDER BY ce.id DESC
+    ORDER BY s.student_id ASC, c.course_code ASC
 ");
 ?>
 
@@ -73,7 +74,7 @@ $enrollments_res = $conn->query("
     <title>Student Course Enrollment - CampusHub</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f5; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; }
+        .container { max-width: 1200px; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; align-items: center; background: #1a202c; color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 20px; }
         .header h2 { margin: 0; font-size: 20px; }
         .btn-back { background: #4a5568; color: white; padding: 8px 14px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 13px; }
@@ -81,7 +82,7 @@ $enrollments_res = $conn->query("
 
         .grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
         .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .card h3 { margin-top: 0; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        .card h3 { margin-top: 0; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; font-size: 16px; }
 
         .form-group { margin-bottom: 15px; }
         label { display: block; font-size: 13px; font-weight: bold; color: #4a5568; margin-bottom: 5px; }
@@ -103,7 +104,7 @@ $enrollments_res = $conn->query("
 
 <div class="container">
     <div class="header">
-        <h2>🎓 Student Course Enrollment</h2>
+        <h2>🎓 Student Course Enrollment & Management</h2>
         <a href="admin_dashboard.php" class="btn-back">⬅️ Back to Admin Dashboard</a>
     </div>
 
@@ -115,9 +116,9 @@ $enrollments_res = $conn->query("
     <?php endif; ?>
 
     <div class="grid">
-        <!-- Assign Course Form -->
+        <!-- Assign Course Form (Manual Extra/Retake Enrollment) -->
         <div class="card">
-            <h3>➕ Enroll Student to Course</h3>
+            <h3>➕ Manually Enroll Student</h3>
             <form action="" method="POST">
                 <div class="form-group">
                     <label>Select Student:</label>
@@ -140,7 +141,7 @@ $enrollments_res = $conn->query("
                         <?php if($courses_res && $courses_res->num_rows > 0): ?>
                             <?php while($c = $courses_res->fetch_assoc()): ?>
                                 <option value="<?php echo $c['id']; ?>">
-                                    <?php echo htmlspecialchars($c['course_code']) . " - " . htmlspecialchars($c['course_name']) . " (" . $c['credit'] . " Cr)"; ?>
+                                    <?php echo htmlspecialchars($c['course_code']) . " - " . htmlspecialchars($c['course_name']) . " (" . $c['credits'] . " Cr)"; ?>
                                 </option>
                             <?php endwhile; ?>
                         <?php endif; ?>
@@ -151,13 +152,15 @@ $enrollments_res = $conn->query("
             </form>
         </div>
 
-        <!-- Enrollment List -->
+        <!-- Detailed Enrollment List -->
         <div class="card">
-            <h3>📖 Current Student Course Registrations</h3>
+            <h3>📖 All Students Enrolled Course List</h3>
             <table>
                 <thead>
                     <tr>
                         <th>Student ID</th>
+                        <th>Student Name</th>
+                        <th>Dept</th>
                         <th>Course Code</th>
                         <th>Course Name</th>
                         <th>Credit</th>
@@ -169,16 +172,18 @@ $enrollments_res = $conn->query("
                         <?php while ($row = $enrollments_res->fetch_assoc()): ?>
                             <tr>
                                 <td><b><?php echo htmlspecialchars($row['student_id']); ?></b></td>
+                                <td><?php echo htmlspecialchars($row['student_name'] ?? 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($row['department'] ?? 'N/A'); ?></td>
                                 <td><b><?php echo htmlspecialchars($row['course_code']); ?></b></td>
                                 <td><?php echo htmlspecialchars($row['course_name']); ?></td>
-                                <td><?php echo number_format($row['credit'], 2); ?></td>
+                                <td><?php echo number_format($row['credits'], 2); ?></td>
                                 <td>
                                     <a href="enroll_student.php?delete_id=<?php echo $row['id']; ?>" class="btn-del" onclick="return confirm('Remove student from this course?');">Drop ❌</a>
                                 </td>
                             </tr>
                         <?php endwhile; ?>
                     <?php else: ?>
-                        <tr><td colspan="5" style="text-align:center; color:#718096;">No student enrolled in any course yet.</td></tr>
+                        <tr><td colspan="7" style="text-align:center; color:#718096;">No student enrolled in any course yet.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
